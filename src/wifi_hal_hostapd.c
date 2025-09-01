@@ -1080,7 +1080,9 @@ int update_hostap_bss(wifi_interface_info_t *interface)
     bss->ieee80211w = vap->u.bss_info.mfp;
 #endif
 #endif
+    wifi_hal_info_print("SJY %s:%d:The value of bss transition activated is %d\n", __func__, __LINE__,vap->u.bss_info.bssTransitionActivated);
     conf->bss_transition = vap->u.bss_info.bssTransitionActivated;
+    wifi_hal_info_print("SJY %s:%d:The value of bss transition activated after assigned to hapd is %d\n", __func__, __LINE__,conf->bss_transition);
     /*Enable Beacon passive , Beacon active and Beacon table support by default */
     conf->radio_measurements[0] |=  (WLAN_RRM_CAPS_BEACON_REPORT_PASSIVE | WLAN_RRM_CAPS_BEACON_REPORT_ACTIVE | WLAN_RRM_CAPS_BEACON_REPORT_TABLE);
     if(vap->u.bss_info.nbrReportActivated) {
@@ -1098,8 +1100,10 @@ int update_hostap_bss(wifi_interface_info_t *interface)
 
 #ifdef CONFIG_USE_HOSTAP_BTM_PATCH
     // - these variables initialized by hostapd code
+    wifi_hal_info_print("SJY Enters CONFIG_USE_HOSTAP_BTM_PATCH macro defined %s:%d \n", __func__, __LINE__);
 #else
     interface->wnm_bss_trans_query_auto_resp = false;  /* optonal: set default value for auto response feature */
+    wifi_hal_info_print("SJY %s:%d Sets the value of bss_transition_token to zero \n", __func__, __LINE__);
     interface->bss_transition_token = 0;
 #endif
 
@@ -2120,6 +2124,7 @@ int update_hostap_config_params(wifi_radio_info_t *radio)
 
 int update_hostap_interface_params(wifi_interface_info_t *interface)
 {
+    wifi_hal_info_print("SJY Entered %s:%d:\n", __func__, __LINE__);
     int ret = RETURN_ERR;
 
     pthread_mutex_lock(&g_wifi_hal.hapd_lock);
@@ -2127,6 +2132,7 @@ int update_hostap_interface_params(wifi_interface_info_t *interface)
     if (update_hostap_data(interface) != RETURN_OK) {
         goto exit;
     }
+    wifi_hal_info_print("SJY %s:%d: Calling update hostap bss\n", __func__, __LINE__);
     if (update_hostap_bss(interface) != RETURN_OK) {
 #ifdef CONFIG_SAE
         if (interface->u.ap.conf.sae_groups) {
@@ -2881,6 +2887,7 @@ void update_eapol_sm_params(wifi_interface_info_t *interface)
 
 int start_bss(wifi_interface_info_t *interface)
 {
+    wifi_hal_info_print("SJY Entered %s:%d:\n", __func__, __LINE__);
     int ret;
     struct hostapd_data     *hapd;
     struct hostapd_bss_config *conf;
@@ -2903,10 +2910,13 @@ int start_bss(wifi_interface_info_t *interface)
     }
     //my_print_hex_dump(conf->ssid.ssid_len, conf->ssid.ssid);
 #if HOSTAPD_VERSION >= 211 //2.11
+    wifi_hal_dbg_print("SJY %s:%d:Calling hostapd_setup_bss of version 2.11\n", __func__, __LINE__);
     ret = hostapd_setup_bss(hapd, 1, true);
 #elif (defined(VNTXER5_PORT) || defined(TARGET_GEMINI7_2)) && (HOSTAPD_VERSION == 210) //2.10
+    wifi_hal_dbg_print("SJY %s:%d:Calling hostapd_setup_bss of version 2.10 with XER5 port\n", __func__, __LINE__);
     ret = hostapd_setup_bss(hapd, 1, true);
 #else
+    wifi_hal_dbg_print("SJY %s:%d:Calling hostapd_setup_bss of version with version 2.10\n", __func__, __LINE__);
     ret = hostapd_setup_bss(hapd, 1);
 #endif
 
