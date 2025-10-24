@@ -1409,7 +1409,11 @@ INT wifi_hal_createVAP(wifi_radio_index_t index, wifi_vap_info_map_t *map)
 #ifdef NL80211_ACL
         wifi_hal_info_print("SJY %s:%d: The value of vap->u.bss_info.mac_filter_enable %d and the value of interface->vap_info.u.bss_info.mac_filter_enable %d\n",
             __func__, __LINE__, vap->u.bss_info.mac_filter_enable, interface->vap_info.u.bss_info.mac_filter_enable);
+<<<<<<< HEAD
         wifi_hal_info_print("SJY %s:%d: The value of interface->vap_info.u.bss_info.mac_filter_mode %d\n",
+=======
+        wifi_util_info_print("SJY %s:%d: The value of interface->vap_info.u.bss_info.mac_filter_mode %d\n",
+>>>>>>> 72d3f7c (added debug prints)
             __func__, __LINE__, interface->vap_info.u.bss_info.mac_filter_mode);
         if ((vap->u.bss_info.enabled == 1) &&
             ((vap->u.bss_info.mac_filter_enable == TRUE) ||
@@ -1677,7 +1681,11 @@ INT wifi_hal_createVAP(wifi_radio_index_t index, wifi_vap_info_map_t *map)
 #endif // EASY_MESH_NODE || EASY_MESH_COLOCATED_NODE
 #ifdef NL80211_ACL
             if (set_acl == 1) {
+<<<<<<< HEAD
                 wifi_hal_info_print("SJY %s:%d: Calling nl80211_set_acl with filter mode as %d for interface:%s\n", __func__, __LINE__, interface->vap_info.u.bss_info.mac_filter_mode, interface_name);
+=======
+                wifi_hal_info_print("SJY %s:%d: Calling nl80211_set_acl with filter mode as %d for interface:%s\n", __func__, __LINE__, filtermode, interface_name);
+>>>>>>> 72d3f7c (added debug prints)
                 nl80211_set_acl(interface);
             }
 #else
@@ -1702,7 +1710,11 @@ INT wifi_hal_createVAP(wifi_radio_index_t index, wifi_vap_info_map_t *map)
                 return RETURN_ERR;
             }
 #endif // NL80211_ACL
+<<<<<<< HEAD
             wifi_hal_info_print("SJY %s:%d: Calling re_configure_steering_mac_list for vap index:%d\n", __func__, __LINE__,
+=======
+            wifi_hal_info_print("%s:%d: Calling re_configure_steering_mac_list for vap index:%d\n", __func__, __LINE__,
+>>>>>>> 72d3f7c (added debug prints)
                 vap->vap_index);
             re_configure_steering_mac_list(interface);
         }
@@ -4629,7 +4641,11 @@ bool is_db_upgrade_required(char* inactive_firmware)
 
 int wifi_hal_setApMacAddressControlMode(uint32_t apIndex, uint32_t mac_filter_mode)
 {
+<<<<<<< HEAD
     wifi_hal_info_print("SJY %s:%d: Entering for vap:%d mac mode:%d\n", __func__, __LINE__,
+=======
+    wifi_hal_info_print("%s:%d: Entering for vap:%d mac mode:%d\n", __func__, __LINE__,
+>>>>>>> 72d3f7c (added debug prints)
         apIndex, mac_filter_mode);
     wifi_interface_info_t *interface = get_interface_by_vap_index(apIndex);
     if (interface == NULL) {
