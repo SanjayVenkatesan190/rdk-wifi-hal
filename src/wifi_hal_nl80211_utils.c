@@ -4131,6 +4131,7 @@ int wifi_steering_del_mac_list(uint32_t vap_index, bm_sta_list_t *sta_info)
 
 void re_configure_steering_mac_list(wifi_interface_info_t *interface)
 {
+    wifi_hal_info_print("SJY Enter %s:%d\n", __func__, __LINE__);
     wifi_vap_info_t *vap;
     bm_sta_list_t *ptr = NULL;
     mac_addr_str_t sta_mac_str;
@@ -4142,15 +4143,17 @@ void re_configure_steering_mac_list(wifi_interface_info_t *interface)
         return;
     } else if((vap->u.bss_info.mac_filter_enable == true) &&
                 (vap->u.bss_info.mac_filter_mode != wifi_mac_filter_mode_black_list)) {
-        wifi_hal_info_print("%s:%d: mac mode:%d for vap:%d\n", __func__, __LINE__, vap->u.bss_info.mac_filter_mode, vap->vap_index);
+        wifi_hal_info_print("SJY %s:%d: mac mode:%d for vap:%d\n", __func__, __LINE__, vap->u.bss_info.mac_filter_mode, vap->vap_index);
         return;
     }
 
     pthread_mutex_lock(&g_wifi_hal.steering_data_lock);
     ptr = hash_map_get_first(interface->bm_sta_map);
     while (ptr != NULL) {
+        wifi_hal_info_print("SJY %s:%d: Enters if ptr not NULL\n", __func__, __LINE__);
         if ((ptr->is_acl_set == true) && (ptr->vap_index == vap->vap_index)) {
             if (vap->u.bss_info.mac_filter_enable == false) {
+                wifi_hal_info_print("SJY %s:%d: mac filter is disabled, force enabling for vap:%d\n", __func__, __LINE__, vap->vap_index);
                 /* Inside this function, If mac filter is not enabled.
                  *  So, Forcefully we will enable mac filter and macmode */
                 steering_set_acl_mode(vap->vap_index, wifi_mac_filter_mode_black_list);
