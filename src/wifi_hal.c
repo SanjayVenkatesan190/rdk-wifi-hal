@@ -1401,14 +1401,14 @@ INT wifi_hal_createVAP(wifi_radio_index_t index, wifi_vap_info_map_t *map)
         }
 
 #ifdef NL80211_ACL
-        wifi_hal_info_print("SJY %s:%d: The value of vap->u.bss_info.mac_filter_enable %d and the value of interface->vap_info.u.bss_info.mac_filter_enable %d\n",
-            __func__, __LINE__, vap->u.bss_info.mac_filter_enable, interface->vap_info.u.bss_info.mac_filter_enable);
-        wifi_hal_info_print("SJY %s:%d: The value of interface->vap_info.u.bss_info.mac_filter_mode %d\n",
-            __func__, __LINE__, interface->vap_info.u.bss_info.mac_filter_mode);
+        wifi_hal_info_print("SJY %s:%d: The value of vap->u.bss_info.mac_filter_enable %d for vap name %s and the value of interface->vap_info.u.bss_info.mac_filter_enable %d for the interface %s\n",
+            __func__, __LINE__, vap->u.bss_info.mac_filter_enable, vap->vap_name, interface->vap_info.u.bss_info.mac_filter_enable, interface->name);
+        wifi_hal_info_print("SJY %s:%d: The value of interface->vap_info.u.bss_info.mac_filter_mode %d for vap index:%d and radio index %d\n",
+            __func__, __LINE__, interface->vap_info.u.bss_info.mac_filter_mode, interface->vap_info.vap_index, interface->vap_info.radio_index);
         if ((vap->u.bss_info.enabled == 1) &&
             ((vap->u.bss_info.mac_filter_enable == TRUE) ||
              (interface->vap_info.u.bss_info.mac_filter_enable != vap->u.bss_info.mac_filter_enable))) {
-            wifi_hal_info_print("%s:%d: Setting the value set_acl as 1 for vap index:%d \n", __func__, __LINE__,
+            wifi_hal_info_print("SJY %s:%d: Setting the value set_acl as 1 for vap index:%d as both values are different\n", __func__, __LINE__,
                 vap->vap_index);
             set_acl = 1;
         }
@@ -1421,10 +1421,10 @@ INT wifi_hal_createVAP(wifi_radio_index_t index, wifi_vap_info_map_t *map)
             continue;
         }
 #endif
-        wifi_hal_info_print("%s:%d: vap index:%d mode:%d vap_name:%s\n", __func__, __LINE__,
+        wifi_hal_info_print("SJY %s:%d: vap index:%d mode:%d vap_name:%s\n", __func__, __LINE__,
             vap->vap_index, vap->vap_mode, vap->vap_name);
         if (vap->vap_mode == wifi_vap_mode_ap) {
-            wifi_hal_info_print("%s:%d: vap_enable_status:%d\n", __func__, __LINE__, vap->u.bss_info.enabled);
+            wifi_hal_info_print("SJY %s:%d: vap_enable_status:%d\n", __func__, __LINE__, vap->u.bss_info.enabled);
             memcpy(vap->u.bss_info.bssid, interface->mac, sizeof(vap->u.bss_info.bssid));
         } else {
             wifi_hal_info_print("%s:%d: vap_enable_status:%d\n", __func__, __LINE__, vap->u.sta_info.enabled);
@@ -4696,7 +4696,7 @@ int steering_set_acl_mode(uint32_t apIndex, uint32_t mac_filter_mode)
 
     vap = &interface->vap_info;
     if (vap->vap_mode != wifi_vap_mode_ap) {
-        wifi_hal_error_print("%s:%d: sta vap:%d does not support this\n", __func__, __LINE__, vap->vap_index);
+        wifi_hal_error_print("SJY %s:%d: sta vap:%d does not support this\n", __func__, __LINE__, vap->vap_index);
         return RETURN_ERR;
     }
 
