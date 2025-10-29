@@ -1671,7 +1671,7 @@ INT wifi_hal_createVAP(wifi_radio_index_t index, wifi_vap_info_map_t *map)
 #endif // EASY_MESH_NODE || EASY_MESH_COLOCATED_NODE
 #ifdef NL80211_ACL
             if (set_acl == 1) {
-                wifi_hal_info_print("SJY %s:%d: Calling nl80211_set_acl with filter mode as %d for interface:%s\n", __func__, __LINE__, interface->vap_info.u.bss_info.mac_filter_mode, interface_name);
+                wifi_hal_info_print("SJY %s:%d: Calling nl80211_set_acl from wifi_hal_createVAP with mac filter enable value %d and filter mode as %d for interface:%s and vap index %d\n", __func__, __LINE__, interface->vap_info.u.bss_info.mac_filter_enable, interface->vap_info.u.bss_info.mac_filter_mode, interface->name, vap->vap_index);
                 nl80211_set_acl(interface);
             }
 #else
@@ -1996,16 +1996,16 @@ INT wifi_hal_addApAclDevice(INT apIndex, mac_address_t DeviceMacAddress)
     memcpy(acl_map->mac_addr, DeviceMacAddress, sizeof(mac_address_t));
 
     hash_map_put(interface->acl_map, strdup(key), acl_map);
-
+    wifi_hal_info_print("SJY %s:%d: Calling nl80211_set_acl from wifi_hal_addApAclDevice with mac filter enable value %d and filter mode as %d for interface:%s and vap index %d\n", __func__, __LINE__, interface->vap_info.u.bss_info.mac_filter_enable, interface->vap_info.u.bss_info.mac_filter_mode, interface->name, vap->vap_index);
     if (nl80211_set_acl(interface) != 0) {
-        wifi_hal_error_print("%s:%d: MAC %s nl80211_set_acl failure for ap_index:%d\n", __func__, __LINE__, key, apIndex);
+        wifi_hal_error_print("SJY %s:%d: MAC %s nl80211_set_acl failure for ap_index:%d\n", __func__, __LINE__, key, apIndex);
         return RETURN_ERR;
     }
 
     if ((vap->u.bss_info.mac_filter_enable == true) &&
         (vap->u.bss_info.mac_filter_mode == wifi_mac_filter_mode_black_list)) {
         if (nl80211_kick_device(interface, DeviceMacAddress) != 0) {
-            wifi_hal_error_print("%s:%d: Unable to kick MAC %s on ap_index %d\n", __func__,
+            wifi_hal_error_print("SJY %s:%d: Unable to kick MAC %s on ap_index %d\n", __func__,
                 __LINE__, DeviceMacAddress, apIndex);
         }
     }
@@ -2055,9 +2055,9 @@ INT wifi_hal_addApAclDevice(INT apIndex, CHAR *DeviceMacAddress)
     to_mac_bytes(acl_map->mac_addr_str, acl_map->mac_addr);
 
     hash_map_put(interface->acl_map, strdup(DeviceMacAddress), acl_map);
-
+    wifi_hal_info_print("SJY %s:%d: Calling nl80211_set_acl from wifi_hal_addApAclDevice with mac filter enable value %d and filter mode as %d for interface:%s and vap index %d\n", __func__, __LINE__, interface->vap_info.u.bss_info.mac_filter_enable, interface->vap_info.u.bss_info.mac_filter_mode, interface->name, vap->vap_index);
     if (nl80211_set_acl(interface) != 0) {
-        wifi_hal_error_print("%s:%d: MAC %s nl80211_set_acl failure for ap_index:%d\n", __func__, __LINE__, DeviceMacAddress, apIndex);
+        wifi_hal_error_print("SJY %s:%d: MAC %s nl80211_set_acl failure for ap_index:%d\n", __func__, __LINE__, DeviceMacAddress, apIndex);
         return RETURN_ERR;
     }
 
@@ -2114,10 +2114,10 @@ INT wifi_hal_delApAclDevice(INT apIndex, mac_address_t DeviceMacAddress)
     if (acl_map != NULL) {
         free(acl_map);
     }
-
+    wifi_hal_info_print("SJY %s:%d: Calling nl80211_set_acl from wifi_hal_addApAclDeviceV2 with mac filter enable value %d and filter mode as %d for interface:%s and vap index %d\n", __func__, __LINE__, interface->vap_info.u.bss_info.mac_filter_enable, interface->vap_info.u.bss_info.mac_filter_mode, interface->name, vap->vap_index);
     if (nl80211_set_acl(interface) != 0) {
         acl_map = (acl_map_t *)malloc(sizeof(acl_map_t));
-        wifi_hal_error_print("%s:%d MAC %s nl80211_set_acl failure for interface:%s\n", __func__, __LINE__, key, interface->name);
+        wifi_hal_error_print("SJY %s:%d MAC %s nl80211_set_acl failure for interface:%s\n", __func__, __LINE__, key, interface->name);
         memcpy(acl_map->mac_addr_str, key, sizeof(mac_addr_str_t));
         memcpy(acl_map->mac_addr, DeviceMacAddress, sizeof(mac_addr_str_t));
 
@@ -2165,10 +2165,10 @@ INT wifi_hal_delApAclDevice(INT apIndex, CHAR *DeviceMacAddress)
     if (acl_map != NULL) {
         free(acl_map);
     }
-
+    wifi_hal_info_print("SJY %s:%d: Calling nl80211_set_acl from wifi_hal_delApAclDevice with mac filter enable value %d and filter mode as %d for interface:%s and vap index %d\n", __func__, __LINE__, interface->vap_info.u.bss_info.mac_filter_enable, interface->vap_info.u.bss_info.mac_filter_mode, interface->name, vap->vap_index);
     if (nl80211_set_acl(interface) != 0) {
         acl_map = (acl_map_t *)malloc(sizeof(acl_map_t));
-        wifi_hal_error_print("%s:%d MAC %s nl80211_set_acl failure for interface:%s\n", __func__, __LINE__, DeviceMacAddress, interface->name);
+        wifi_hal_error_print("SJY %s:%d MAC %s nl80211_set_acl failure for interface:%s\n", __func__, __LINE__, DeviceMacAddress, interface->name);
         memcpy(acl_map->mac_addr_str, DeviceMacAddress, sizeof(mac_addr_str_t));
         to_mac_bytes(acl_map->mac_addr_str, acl_map->mac_addr);
 
@@ -2221,7 +2221,7 @@ INT wifi_hal_delApAclDevices(INT apIndex)
             free(temp_acl_map);
         }
     }
-
+    wifi_hal_info_print("SJY %s:%d: Calling nl80211_set_acl from wifi_hal_delApAclDeviceS with mac filter enable value %d and filter mode as %d for interface:%s and vap index %d\n", __func__, __LINE__, interface->vap_info.u.bss_info.mac_filter_enable, interface->vap_info.u.bss_info.mac_filter_mode, interface->name, vap->vap_index);
     return nl80211_set_acl(interface);
 }
 
@@ -4668,7 +4668,7 @@ int wifi_hal_setApMacAddressControlMode(uint32_t apIndex, uint32_t mac_filter_mo
         wifi_hal_error_print("SJY %s:%d Wrong Mac mode %d\n", __func__, __LINE__, mac_filter_mode);
         return RETURN_ERR;
     }
-    wifi_hal_info_print("SJY %s:%d: Calling nl80211_set_acl for vap:%d\n", __func__, __LINE__, apIndex);
+    wifi_hal_info_print("SJY %s:%d: Calling nl80211_set_acl from wifi_hal_setApMacAddressControlMode for vap:%d\n", __func__, __LINE__, apIndex);
     return (nl80211_set_acl(interface));
 }
 
@@ -4716,5 +4716,6 @@ int steering_set_acl_mode(uint32_t apIndex, uint32_t mac_filter_mode)
     }
 
     vap->u.bss_info.mac_filter_mode = mac_filter_mode;
+    wifi_hal_info_print("SJY %s:%d: Calling nl80211_set_acl from steering_set_acl_mode for vap:%d\n", __func__, __LINE__, apIndex);
     return (nl80211_set_acl(interface));
 }
