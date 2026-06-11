@@ -14129,7 +14129,11 @@ int wifi_drv_sta_remove(void *priv, const u8 *addr)
 
     wifi_hal_dbg_print("%s:%d: Enter\n", __func__, __LINE__);
 
+#if defined (CONFIG_WIFI_EMULATOR)
+    return wifi_sta_remove(interface, addr, 1, 1);
+#else
     return wifi_sta_remove(interface, addr, -1, 1);
+#endif
 }
 
 int wifi_drv_sta_add(void *priv, struct hostapd_sta_add_params *params)
