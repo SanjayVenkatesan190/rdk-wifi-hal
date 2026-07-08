@@ -266,6 +266,10 @@ void init_hostap_bss(wifi_interface_info_t *interface)
 
     conf->gas_frag_limit = 1400;
 
+    /* DBG: track sae_groups pointer state on every init_hostap_bss entry */
+    wifi_hal_error_print("SJY %s:%d: DBG init_hostap_bss: iface=%s sae_groups=%p (expect NULL on first call, non-NULL = LEAK)\n",
+        __func__, __LINE__, interface->name, (void *)conf->sae_groups);
+
     if (interface->u.ap.conf_initialized == false) {
         dl_list_init(&conf->anqp_elem);
         interface->u.ap.conf_initialized = true;
@@ -606,6 +610,9 @@ int update_security_config(wifi_vap_security_t *sec, struct hostapd_bss_config *
 
 #ifdef CONFIG_SAE
     if (conf->auth_algs & WPA_AUTH_ALG_SAE) {
+        /* DBG: track sae_groups alloc — if already non-NULL here, previous cycle leaked it */
+        wifi_hal_error_print("SJY %s:%d: DBG sae_groups BEFORE alloc: iface=%s ptr=%p (non-NULL = prev leak)\n",
+            __func__, __LINE__, conf->iface, (void *)conf->sae_groups);
         if (conf->sae_groups == NULL &&
             (conf->sae_groups = os_malloc(sizeof(*conf->sae_groups) * 4)) != NULL) {
             conf->sae_groups[0] = 19;
@@ -613,6 +620,8 @@ int update_security_config(wifi_vap_security_t *sec, struct hostapd_bss_config *
             conf->sae_groups[2] = 21;
             conf->sae_groups[3] = -1;
         }
+        wifi_hal_error_print("SJY %s:%d: DBG sae_groups AFTER alloc: iface=%s ptr=%p\n",
+            __func__, __LINE__, conf->iface, (void *)conf->sae_groups);
     }
 #endif
 
@@ -771,6 +780,12 @@ int update_security_config(wifi_vap_security_t *sec, struct hostapd_bss_config *
         wifi_radius_settings_t *radius_cfg;
         if (conf->mdu) {
             radius_cfg = &sec->repurposed_radius;
+            /* DBG: catch overflow — wpa_passphrase is fixed-size (64 bytes in hostapd) */
+            wifi_hal_error_print("SJY %s:%d: DBG MDU wpa_passphrase: iface=%s key_len=%zu buf_size=%zu %s\n",
+                __func__, __LINE__, conf->iface,
+                strlen(sec->u.key.key), sizeof(conf->ssid.wpa_passphrase),
+                (strlen(sec->u.key.key) >= sizeof(conf->ssid.wpa_passphrase)) ?
+                    "*** OVERFLOW DETECTED ***" : "OK");
             strcpy(conf->ssid.wpa_passphrase, sec->u.key.key);
             conf->ssid.wpa_passphrase_set = true;
             conf->osen = 0;
@@ -929,6 +944,12 @@ int update_security_config(wifi_vap_security_t *sec, struct hostapd_bss_config *
 
         if (!is_open_sec(sec)) {
             // set wpa passphrase security key and indication flag
+            /* DBG: catch overflow — wpa_passphrase is fixed-size (64 bytes in hostapd) */
+            wifi_hal_error_print("SJY %s:%d: DBG wpa_passphrase: iface=%s key_len=%zu buf_size=%zu %s\n",
+                __func__, __LINE__, conf->iface,
+                strlen(sec->u.key.key), sizeof(conf->ssid.wpa_passphrase),
+                (strlen(sec->u.key.key) >= sizeof(conf->ssid.wpa_passphrase)) ?
+                    "*** OVERFLOW DETECTED ***" : "OK");
             strcpy(conf->ssid.wpa_passphrase, sec->u.key.key);
             conf->ssid.wpa_passphrase_set = true;
             conf->osen = 0;
