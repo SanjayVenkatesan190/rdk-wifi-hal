@@ -10396,7 +10396,6 @@ int nl80211_connect_sta(wifi_interface_info_t *interface)
     wifi_vap_security_t *security;
     mac_addr_str_t bssid_str;
     //unsigned int rsn_ie_len;
-    struct nl_msg *msg;
 #if !defined(CONFIG_WIFI_EMULATOR) && !defined(BANANA_PI_PORT)
     u8 *pos, rsn_ie[128];
     ieee80211_tlv_t *bh_rsn = NULL;
@@ -10452,6 +10451,7 @@ int nl80211_connect_sta(wifi_interface_info_t *interface)
     }
 
 #if defined(CONFIG_IEEE80211BE) && defined(CONFIG_GENERIC_MLO)
+    struct nl_msg *msg;
     if (bss_ie->buff && needs_mlo_probe(bss_ie->buff, bss_ie->buff_len)) {
         wifi_hal_dbg_print("%s:%d: MLD detected. Performing synchronous targeted probe...\n",
                            __func__, __LINE__);
