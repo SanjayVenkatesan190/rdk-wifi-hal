@@ -11664,7 +11664,7 @@ int nl80211_start_scan(wifi_interface_info_t *interface, uint flags,
     pthread_mutex_unlock(&interface->scan_cmd_mutex);
     if (ret) {
         wifi_hal_stats_error_print("%s:%d: [SCAN] TRIGGER_SCAN command failed: ret=%d (%s)\n", __func__, __LINE__, ret, strerror(-ret));
-        return -1;
+        return ret;
     }
     wifi_hal_stats_dbg_print("%s:%d: [SCAN] scan started successfully\n", __func__, __LINE__);
     return 0;

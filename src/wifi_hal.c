@@ -3565,6 +3565,13 @@ INT wifi_hal_startNeighborScan(INT apIndex, wifi_neighborScanMode_t scan_mode, I
         pthread_mutex_lock(&interface->scan_state_mutex);
         interface->scan_state = WIFI_SCAN_STATE_NONE;
         pthread_mutex_unlock(&interface->scan_state_mutex);
+        if (res == -EAGAIN || res == -EBUSY) {
+            errno = -res;
+            wifi_hal_stats_dbg_print(
+                "%s:%d: [SCAN] transient trigger failure ret=%d; reporting scan not ready\n",
+                __func__, __LINE__, res);
+            return WIFI_HAL_NOT_READY;
+        }
         wifi_hal_stats_error_print("%s:%d: [SCAN] scan trigger failed for '%s'\n", __func__,
             __LINE__, interface->name);
         return WIFI_HAL_ERROR;
