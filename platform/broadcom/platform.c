@@ -17,7 +17,16 @@
   limitations under the License.
  **************************************************************************/
 
+#include <ctype.h>
+#include <errno.h>
+#include <limits.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+#include <sys/file.h>
+#include <time.h>
 #include "wifi_hal.h"
 #define MAX_EMU_NEIGHBOR_AP_COUNT 64
 
@@ -404,6 +413,544 @@ int get_emu_neighbor_stats(uint radio_index, wifi_neighbor_ap2_t **neighbor_ap_a
 #endif // WIFI_EMULATOR_CHANGE
 #endif
 
+/* OpenSync's legacy Broadcom HAL publishes scan output in this file while
+ * holding the per-radio driver lock. */
+#define LEGACY_ESCAN_RESULT_MAX_AGE_SECONDS 900
+#define LEGACY_ESCAN_LINE_LENGTH 512
+#define LEGACY_ESCAN_MAX_RESULTS 1024
+
+typedef struct {
+    wifi_neighbor_ap2_t ap;
+    bool in_record;
+    bool channel_seen;
+    bool found_rsn;
+    bool found_wpa;
+    bool found_wpa2;
+    bool found_wpa3;
+    bool found_tkip;
+    bool found_aes;
+    bool found_psk;
+    bool found_wep;
+    bool found_ht;
+    bool found_vht;
+    bool found_he;
+    bool found_eht;
+} legacy_escan_record_t;
+
+static char *legacy_escan_trim(char *value)
+{
+    char *end;
+
+    while (isspace((unsigned char)*value)) {
+        value++;
+    }
+
+    end = value + strlen(value);
+    while (end > value && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+    *end = '\0';
+    return value;
+}
+
+static void legacy_escan_copy(char *destination, size_t destination_size,
+    const char *source)
+{
+    if (destination_size == 0) {
+        return;
+    }
+    snprintf(destination, destination_size, "%s", source);
+}
+
+static bool legacy_escan_parse_int(const char *value, int *result)
+{
+    char *end = NULL;
+    long parsed;
+
+    errno = 0;
+    parsed = strtol(value, &end, 10);
+    if (end == value || errno == ERANGE || parsed < INT_MIN || parsed > INT_MAX) {
+        return false;
+    }
+    *result = (int)parsed;
+    return true;
+}
+
+static void legacy_escan_append_csv(char *destination, size_t destination_size,
+    const char *value)
+{
+    size_t used;
+
+    if (destination_size == 0 || value == NULL || value[0] == '\0') {
+        return;
+    }
+
+    used = strlen(destination);
+    if (used > 0 && used < destination_size - 1) {
+        destination[used++] = ',';
+        destination[used] = '\0';
+    }
+    if (used < destination_size - 1) {
+        snprintf(destination + used, destination_size - used, "%s", value);
+    }
+}
+
+static void legacy_escan_set_bandwidth(legacy_escan_record_t *record,
+    const char *value)
+{
+    const char *bandwidth = "20";
+
+    if (strstr(value, "320") != NULL) {
+        bandwidth = "320";
+    } else if (strstr(value, "160") != NULL) {
+        bandwidth = "160";
+    } else if (strstr(value, "80") != NULL) {
+        bandwidth = "80";
+    } else if (strstr(value, "40") != NULL ||
+        strchr(value, 'u') != NULL || strchr(value, 'l') != NULL) {
+        bandwidth = "40";
+    }
+    legacy_escan_copy(record->ap.ap_OperatingChannelBandwidth,
+        sizeof(record->ap.ap_OperatingChannelBandwidth), bandwidth);
+}
+
+static bool legacy_escan_set_channel(legacy_escan_record_t *record,
+    const char *value, wifi_freq_bands_t band)
+{
+    const char *channel_value = value;
+    char *end = NULL;
+    long channel;
+
+    if (strncasecmp(channel_value, "6g", 2) == 0) {
+        channel_value += 2;
+    }
+
+    errno = 0;
+    channel = strtol(channel_value, &end, 10);
+    if (end == channel_value || errno == ERANGE || channel < 1 ||
+        channel > UINT_MAX) {
+        return false;
+    }
+
+    record->ap.ap_Channel = (unsigned int)channel;
+    record->channel_seen = true;
+    legacy_escan_set_bandwidth(record, value);
+
+    if (band == WIFI_FREQUENCY_6_BAND ||
+        strncasecmp(value, "6g", 2) == 0) {
+        legacy_escan_copy(record->ap.ap_OperatingFrequencyBand,
+            sizeof(record->ap.ap_OperatingFrequencyBand), "6GHz");
+    } else if (band == WIFI_FREQUENCY_2_4_BAND || channel <= 14) {
+        legacy_escan_copy(record->ap.ap_OperatingFrequencyBand,
+            sizeof(record->ap.ap_OperatingFrequencyBand), "2.4GHz");
+    } else {
+        legacy_escan_copy(record->ap.ap_OperatingFrequencyBand,
+            sizeof(record->ap.ap_OperatingFrequencyBand), "5GHz");
+    }
+    return true;
+}
+
+static void legacy_escan_parse_rates(legacy_escan_record_t *record,
+    const char *value)
+{
+    char rates[256];
+    char *token;
+    char *saveptr = NULL;
+
+    snprintf(rates, sizeof(rates), "%s", value);
+    token = strtok_r(rates, " []\r\n", &saveptr);
+    while (token != NULL) {
+        bool basic = false;
+        char *marker = strchr(token, '(');
+
+        if (strcmp(token, "]") == 0) {
+            break;
+        }
+        if (marker != NULL) {
+            *marker = '\0';
+            basic = true;
+        }
+        legacy_escan_append_csv(record->ap.ap_SupportedDataTransferRates,
+            sizeof(record->ap.ap_SupportedDataTransferRates), token);
+        if (basic) {
+            legacy_escan_append_csv(record->ap.ap_BasicDataTransferRates,
+                sizeof(record->ap.ap_BasicDataTransferRates), token);
+        }
+        token = strtok_r(NULL, " []\r\n", &saveptr);
+    }
+}
+
+static void legacy_escan_set_security(legacy_escan_record_t *record)
+{
+    const char *security = "None";
+    const char *encryption = "None";
+
+    if (record->found_rsn && record->found_wpa3 && record->found_wpa2) {
+        security = "WPA3-Personal-Transition";
+        encryption = "AES";
+    } else if (record->found_rsn && record->found_wpa3) {
+        security = "WPA3-Personal";
+        encryption = "AES";
+    } else if (record->found_rsn && record->found_wpa && record->found_wpa2) {
+        security = record->found_psk ? "WPA-WPA2" : "WPA-WPA2-Enterprise";
+    } else if (record->found_rsn && record->found_wpa2) {
+        security = record->found_psk ? "WPA2" : "WPA2-Enterprise";
+    } else if (record->found_wpa) {
+        security = "WPA";
+    } else if (record->found_wep) {
+        security = "WEP";
+    }
+
+    if (record->found_tkip && record->found_aes) {
+        encryption = "TKIPandAES";
+    } else if (record->found_tkip) {
+        encryption = "TKIP";
+    } else if (record->found_aes) {
+        encryption = "AES";
+    }
+
+    legacy_escan_copy(record->ap.ap_SecurityModeEnabled,
+        sizeof(record->ap.ap_SecurityModeEnabled), security);
+    legacy_escan_copy(record->ap.ap_EncryptionMode,
+        sizeof(record->ap.ap_EncryptionMode), encryption);
+}
+
+static void legacy_escan_set_standards(legacy_escan_record_t *record)
+{
+    char rates[256];
+    char *saveptr = NULL;
+    const char *token;
+    bool support_b = false;
+    bool support_g = false;
+
+    record->ap.ap_SupportedStandards[0] = '\0';
+    if (record->ap.ap_Channel >= 36) {
+        legacy_escan_append_csv(record->ap.ap_SupportedStandards,
+            sizeof(record->ap.ap_SupportedStandards), "a");
+    } else {
+        snprintf(rates, sizeof(rates), "%s",
+            record->ap.ap_SupportedDataTransferRates);
+        token = strtok_r(rates, ",", &saveptr);
+        while (token != NULL) {
+            if (strcmp(token, "1") == 0 || strcmp(token, "2") == 0 ||
+                strcmp(token, "5.5") == 0 || strcmp(token, "11") == 0) {
+                support_b = true;
+            }
+            if (strcmp(token, "6") == 0 || strcmp(token, "9") == 0 ||
+                strcmp(token, "12") == 0 || strcmp(token, "18") == 0 ||
+                strcmp(token, "24") == 0 || strcmp(token, "36") == 0 ||
+                strcmp(token, "48") == 0 || strcmp(token, "54") == 0) {
+                support_g = true;
+            }
+            token = strtok_r(NULL, ",", &saveptr);
+        }
+        if (support_b) {
+            legacy_escan_append_csv(record->ap.ap_SupportedStandards,
+                sizeof(record->ap.ap_SupportedStandards), "b");
+        }
+        if (support_g) {
+            legacy_escan_append_csv(record->ap.ap_SupportedStandards,
+                sizeof(record->ap.ap_SupportedStandards), "g");
+        }
+    }
+
+    if (record->found_ht) {
+        legacy_escan_append_csv(record->ap.ap_SupportedStandards,
+            sizeof(record->ap.ap_SupportedStandards), "n");
+    } else if (record->found_vht) {
+        legacy_escan_append_csv(record->ap.ap_SupportedStandards,
+            sizeof(record->ap.ap_SupportedStandards), "ac");
+    } else if (record->found_he) {
+        legacy_escan_append_csv(record->ap.ap_SupportedStandards,
+            sizeof(record->ap.ap_SupportedStandards), "ax");
+    } else if (record->found_eht) {
+        legacy_escan_append_csv(record->ap.ap_SupportedStandards,
+            sizeof(record->ap.ap_SupportedStandards), "be");
+    }
+
+    legacy_escan_copy(record->ap.ap_OperatingStandards,
+        sizeof(record->ap.ap_OperatingStandards),
+        record->ap.ap_SupportedStandards);
+}
+
+static bool legacy_escan_append_record(legacy_escan_record_t *record,
+    unsigned int expected_channel, wifi_neighbor_ap2_t **results,
+    size_t *result_count, size_t *result_capacity)
+{
+    wifi_neighbor_ap2_t *new_results;
+
+    if (!record->in_record) {
+        return true;
+    }
+    record->ap.ap_BeaconPeriod = 100;
+    record->ap.ap_DTIMPeriod = 1;
+    if (record->ap.ap_Mode[0] == '\0') {
+        legacy_escan_copy(record->ap.ap_Mode, sizeof(record->ap.ap_Mode),
+            "Infrastructure");
+    }
+    legacy_escan_set_security(record);
+    legacy_escan_set_standards(record);
+
+    if (!record->channel_seen || record->ap.ap_Channel != expected_channel ||
+        record->ap.ap_BSSID[0] == '\0') {
+        memset(record, 0, sizeof(*record));
+        return true;
+    }
+    if (*result_count >= LEGACY_ESCAN_MAX_RESULTS) {
+        return false;
+    }
+    if (*result_count == *result_capacity) {
+        size_t new_capacity = (*result_capacity == 0) ? 16 : *result_capacity * 2;
+        new_results = realloc(*results, new_capacity * sizeof(**results));
+        if (new_results == NULL) {
+            return false;
+        }
+        *results = new_results;
+        *result_capacity = new_capacity;
+    }
+    (*results)[*result_count] = record->ap;
+    (*result_count)++;
+    memset(record, 0, sizeof(*record));
+    return true;
+}
+
+static void legacy_escan_parse_line(legacy_escan_record_t *record, char *line,
+    wifi_freq_bands_t band, bool *scan_error)
+{
+    char *value = legacy_escan_trim(line);
+    char *original_value = value;
+    char token[64];
+    char *quote_end;
+    const char *field;
+    int parsed;
+
+    if (value[0] == '\0') {
+        return;
+    }
+    if (strstr(value, "Scan Rejected") != NULL ||
+        strstr(value, "misc. error/abort") != NULL ||
+        strstr(value, ", status:") != NULL) {
+        *scan_error = true;
+        return;
+    }
+
+    record->in_record = true;
+    field = strstr(original_value, "Channel: ");
+    if (field != NULL) {
+        legacy_escan_set_channel(record, field + 9, band);
+    }
+    field = strstr(original_value, "RSSI: ");
+    if (field != NULL && legacy_escan_parse_int(field + 6, &parsed)) {
+        record->ap.ap_SignalStrength = parsed;
+    }
+    field = strstr(original_value, "noise: ");
+    if (field != NULL && legacy_escan_parse_int(field + 7, &parsed)) {
+        record->ap.ap_Noise = parsed;
+    }
+    field = strstr(original_value, "Chanspec: ");
+    if (field != NULL) {
+        legacy_escan_set_bandwidth(record, field + 10);
+    }
+
+    if (strncmp(value, "BSSID: ", 7) == 0) {
+        if (sscanf(value + 7, "%63s", token) == 1) {
+            legacy_escan_copy(record->ap.ap_BSSID,
+                sizeof(record->ap.ap_BSSID), token);
+        }
+    } else if (strncmp(value, "SSID: ", 6) == 0) {
+        value += 6;
+        value = legacy_escan_trim(value);
+        if (value[0] == '"' || value[0] == '\'') {
+            char quote = value[0];
+            value++;
+            quote_end = strrchr(value, quote);
+            if (quote_end != NULL) {
+                *quote_end = '\0';
+            }
+        }
+        legacy_escan_copy(record->ap.ap_SSID,
+            sizeof(record->ap.ap_SSID), value);
+    } else if (strncmp(value, "Mode: ", 6) == 0) {
+        if (sscanf(value + 6, "%63s", token) == 1) {
+            legacy_escan_copy(record->ap.ap_Mode, sizeof(record->ap.ap_Mode),
+                strcmp(token, "Managed") == 0 ? "Infrastructure" : "AdHoc");
+        }
+    } else if (strncmp(value, "Channel: ", 9) == 0) {
+        legacy_escan_set_channel(record, value + 9, band);
+    } else if (strncmp(value, "RSSI: ", 6) == 0) {
+        if (legacy_escan_parse_int(value + 6, &parsed)) {
+            record->ap.ap_SignalStrength = parsed;
+        }
+    } else if (strncmp(value, "noise: ", 7) == 0) {
+        if (legacy_escan_parse_int(value + 7, &parsed)) {
+            record->ap.ap_Noise = parsed;
+        }
+    } else if (strncmp(value, "Supported Rates: ", 18) == 0) {
+        legacy_escan_parse_rates(record, value + 18);
+    } else if (strncmp(value, "QBSS Channel Utilization: ", 26) == 0) {
+        const char *utilization = strchr(value + 26, '(');
+        if (utilization != NULL) {
+            utilization++;
+        } else {
+            utilization = value + 26;
+        }
+        if (legacy_escan_parse_int(utilization, &parsed) && parsed >= 0) {
+            record->ap.ap_ChannelUtilization = (unsigned int)parsed;
+        }
+    }
+
+    if (strstr(original_value, "RSN") != NULL) {
+        record->found_rsn = true;
+    }
+    if (strstr(original_value, "WPA3") != NULL) {
+        record->found_wpa3 = true;
+    }
+    if (strstr(original_value, "WPA2") != NULL) {
+        record->found_wpa2 = true;
+    }
+    if (strncmp(original_value, "WPA:", 4) == 0) {
+        record->found_wpa = true;
+    }
+    if (strstr(original_value, "unicast ciphers") != NULL) {
+        if (strstr(original_value, "TKIP") != NULL) {
+            record->found_tkip = true;
+        }
+        if (strstr(original_value, "AES") != NULL) {
+            record->found_aes = true;
+        }
+    }
+    if (strstr(original_value, "AKM Suites") != NULL &&
+        strstr(original_value, "PSK") != NULL) {
+        record->found_psk = true;
+    }
+    if (strstr(original_value, "WEP") != NULL) {
+        record->found_wep = true;
+    }
+    if (strstr(original_value, "HT Capable") != NULL) {
+        record->found_ht = true;
+    }
+    if (strstr(original_value, "VHT Capable") != NULL) {
+        record->found_vht = true;
+    }
+    if (strstr(original_value, "HE Capable") != NULL) {
+        record->found_he = true;
+    }
+    if (strstr(original_value, "EHT Capable") != NULL) {
+        record->found_eht = true;
+    }
+}
+
+static int get_legacy_escan_neighbor_results(INT radio_index,
+    wifi_neighbor_ap2_t **neighbor_ap_array, UINT *output_array_size)
+{
+    wifi_radio_info_t *radio;
+    legacy_escan_record_t record = {0};
+    wifi_neighbor_ap2_t *results = NULL;
+    size_t result_count = 0;
+    size_t result_capacity = 0;
+    char result_path[64];
+    char lock_path[64];
+    char line[LEGACY_ESCAN_LINE_LENGTH];
+    FILE *result_file = NULL;
+    struct stat result_stat;
+    time_t now;
+    bool scan_error = false;
+    int lock_fd = -1;
+    int result_fd = -1;
+    int ret = RETURN_ERR;
+
+    if (neighbor_ap_array == NULL || output_array_size == NULL) {
+        errno = EINVAL;
+        return RETURN_ERR;
+    }
+    *neighbor_ap_array = NULL;
+    *output_array_size = 0;
+
+    radio = get_radio_by_rdk_index(radio_index);
+    if (radio == NULL || radio->oper_param.channel == 0) {
+        errno = EINVAL;
+        return RETURN_ERR;
+    }
+
+    snprintf(result_path, sizeof(result_path), "/var/wl%d_escanresults",
+        radio_index);
+    snprintf(lock_path, sizeof(lock_path), "/tmp/wl%d_escan_drvlock",
+        radio_index);
+
+    lock_fd = open(lock_path, O_RDONLY | O_CREAT, 0444);
+    if (lock_fd < 0) {
+        return RETURN_ERR;
+    }
+    if (flock(lock_fd, LOCK_EX | LOCK_NB) < 0) {
+        errno = (errno == EWOULDBLOCK) ? EAGAIN : errno;
+        close(lock_fd);
+        return RETURN_ERR;
+    }
+
+    result_fd = open(result_path, O_RDONLY);
+    if (result_fd < 0 || fstat(result_fd, &result_stat) < 0) {
+        errno = EAGAIN;
+        goto cleanup;
+    }
+    if (result_stat.st_size <= 0) {
+        errno = EAGAIN;
+        goto cleanup;
+    }
+    now = time(NULL);
+    if (now < result_stat.st_mtime ||
+        now - result_stat.st_mtime > LEGACY_ESCAN_RESULT_MAX_AGE_SECONDS) {
+        errno = EAGAIN;
+        goto cleanup;
+    }
+    if (flock(result_fd, LOCK_EX) < 0) {
+        goto cleanup;
+    }
+
+    result_file = fdopen(result_fd, "r");
+    if (result_file == NULL) {
+        goto cleanup;
+    }
+    result_fd = -1;
+    while (fgets(line, sizeof(line), result_file) != NULL) {
+        char *trimmed = legacy_escan_trim(line);
+
+        if (trimmed[0] == '\0') {
+            if (!legacy_escan_append_record(&record, radio->oper_param.channel,
+                    &results, &result_count, &result_capacity)) {
+                errno = EOVERFLOW;
+                goto cleanup;
+            }
+            continue;
+        }
+        legacy_escan_parse_line(&record, line, radio->oper_param.band, &scan_error);
+    }
+    if (scan_error || ferror(result_file) ||
+        !legacy_escan_append_record(&record, radio->oper_param.channel,
+            &results, &result_count, &result_capacity) ||
+        result_count == 0) {
+        errno = EAGAIN;
+        goto cleanup;
+    }
+    *neighbor_ap_array = results;
+    *output_array_size = (UINT)result_count;
+    results = NULL;
+    errno = 0;
+    ret = RETURN_OK;
+
+cleanup:
+    free(results);
+    if (result_file != NULL) {
+        flock(fileno(result_file), LOCK_UN);
+        fclose(result_file);
+    } else if (result_fd >= 0) {
+        flock(result_fd, LOCK_UN);
+        close(result_fd);
+    }
+    flock(lock_fd, LOCK_UN);
+    close(lock_fd);
+    return ret;
+}
+
 INT wifi_startNeighborScan(INT apIndex, wifi_neighborScanMode_t scan_mode, INT dwell_time, UINT chan_num, UINT *chan_list)
 {
     return wifi_hal_startNeighborScan(apIndex, scan_mode, dwell_time, chan_num, chan_list);
@@ -416,7 +963,13 @@ INT wifi_getNeighboringWiFiStatus(INT radio_index, wifi_neighbor_ap2_t **neighbo
     ret = wifi_hal_getNeighboringWiFiStatus(radio_index, neighbor_ap_array, output_array_size);
     if (ret == WIFI_HAL_NOT_READY) {
         return ret;
-    } else if (ret == RETURN_ERR) {
+    } else if (ret != RETURN_OK &&
+        get_legacy_escan_neighbor_results(radio_index, neighbor_ap_array,
+            output_array_size) == RETURN_OK) {
+        wifi_hal_stats_dbg_print("%s:%d: using legacy OpenSync neighbor results for radio %d\n",
+            __func__, __LINE__, radio_index);
+        return RETURN_OK;
+    } else if (ret != RETURN_OK) {
         wifi_hal_stats_error_print("%s:%d: wifi_hal_getNeighboringWiFiStatus failed\n", __func__,
             __LINE__);
     }
